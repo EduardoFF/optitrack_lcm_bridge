@@ -26,7 +26,7 @@ class pose_t(object):
 
     def _encode_one(self, buf):
         buf.write(struct.pack(">B", self.robotid))
-        buf.write(struct.pack('>3i', *self.position[:3]))
+        buf.write(struct.pack('>3h', *self.position[:3]))
         buf.write(struct.pack('>4h', *self.orientation[:4]))
         buf.write(struct.pack(">h", self.velocity))
 
@@ -43,7 +43,7 @@ class pose_t(object):
     def _decode_one(buf):
         self = pose_t()
         self.robotid = struct.unpack(">B", buf.read(1))[0]
-        self.position = struct.unpack('>3i', buf.read(12))
+        self.position = struct.unpack('>3h', buf.read(6))
         self.orientation = struct.unpack('>4h', buf.read(8))
         self.velocity = struct.unpack(">h", buf.read(2))[0]
         return self
@@ -52,7 +52,7 @@ class pose_t(object):
     _hash = None
     def _get_hash_recursive(parents):
         if pose_t in parents: return 0
-        tmphash = (0x23a1414b9b549cfd) & 0xffffffffffffffff
+        tmphash = (0xecda64b9b709dc0) & 0xffffffffffffffff
         tmphash  = (((tmphash<<1)&0xffffffffffffffff)  + (tmphash>>63)) & 0xffffffffffffffff
         return tmphash
     _get_hash_recursive = staticmethod(_get_hash_recursive)

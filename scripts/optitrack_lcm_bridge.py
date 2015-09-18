@@ -21,10 +21,15 @@ import roslib
 from std_msgs.msg import Float32
 from geometry_msgs.msg import PoseStamped
 from optitrack_msgs.msg import RigidBodies
+from optitrack_msgs.msg import Markers
 import lcm
 from poselcm import pose_list_t
 from poselcm import pose_t
+from markerlcm import marker_list_t
+from markerlcm import marker_t
+
 import time
+
 import math
 #############################################################
 #############################################################
@@ -40,18 +45,26 @@ class LCMTrackerBridge():
         rospy.loginfo("%s started" % nodename)
     
         self.nodes = {}
+        self.markers = []
         self.message_counter = 0
+        self.marker_msg_counter = 0
         self.channel = rospy.get_param("~channel", "TRACK")
+        self.marker_channel = rospy.get_param("~channel", "markers")
         print "Publishing LCM channel",self.channel
         self.x_shift = rospy.get_param("~x_shift", 0.0)
         self.y_shift = rospy.get_param("~y_shift", 0.0)
     
         rospy.Subscriber('/optitrack/rigid_bodies', \
                          RigidBodies, self.trackCallback)
+        rospy.Subscriber('/optitrack/unlabeled_markers', \
+                         Markers, self.markerCallback)
+
         self.lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=1") 
+
+        self.publish_rigid_bodies = rospy.get_param("~publish_rigid_bodies",True)
+        self.publish_markers = rospy.get_param("~publish_markers",False)
     
-    
-        self.rate = rospy.get_param("~rate", 10)
+        self.rate = rospy.get_param("~rate", 30)
         print "rate = ",self.rate
         #self.timeout_ticks = rospy.get_param("~timeout_ticks", 2)
         #self.left = 0
@@ -81,6 +94,12 @@ class LCMTrackerBridge():
     def spinOnce(self):
     #############################################################
         tt = self.ticks_since_start * (1.0/self.rate)
+        if self.publish_rigid_bodies:
+            self.publishRigidBodies()
+        if self.publish_markers:
+            self.publishMarkers()
+
+    def publishRigidBodies(self):
         # testing
         msg = pose_list_t()
         msg.timestamp = int(time.time() * 1000000)
@@ -97,9 +116,30 @@ class LCMTrackerBridge():
             msg.poses.append(pose)
         msg.n = len(msg.poses)
         self.lc.publish(self.channel, msg.encode())
+        if self.ticks_since_start % 10 == 0:
+            print "published ", len(msg.poses), "rigid bodies"
+        #print "msg published"
+    def publishMarkers(self):
+        # testing
+        msg = marker_list_t()
+        msg.timestamp = int(time.time() * 1000000)
+        msg.markers=[]
+        #print len(self.nodes)
+        for (v,pos) in self.markers:
+            marker = marker_t()
+            marker.visible = 1
+            (x,y,z) = pos
+#            pose.position = [math.ceil(x*1000), math.ceil(z*1000), math.ceil(y*1000)]
+            marker.position = [math.ceil(-1*x*1000), math.ceil(-1*y*1000), math.ceil(z*1000)]
+            msg.markers.append(marker)
+        msg.n = len(msg.markers)
+        if self.ticks_since_start % 10 == 0:
+            print "published ",len(msg.markers),"markers"
+        self.lc.publish(self.marker_channel, msg.encode())
         #print "msg published"
 
-    
+
+        
     #############################################################
     def trackCallback(self,msg):
     ############################################################
@@ -120,10 +160,29 @@ class LCMTrackerBridge():
         to check if the system is alive
         """
         if self.message_counter % 100 == 0:
-            print  "message_counter: ", self.message_counter
+            print  "rigid_bodies_msg__counter: ", self.message_counter
         #print "got msg ",str(msg)
         #rospy.loginfo("-D- twistCallback: %s" % str(msg))
-    
+
+    #############################################################
+    def markerCallback(self,msg):
+    ############################################################
+        self.markers = []
+        for i in range(len(msg.markers)):
+            vis = msg.markers[i].visible
+            pos = (msg.markers[i].position.x, \
+                   msg.markers[i].position.y, \
+                   msg.markers[i].position.z)
+            self.markers.append((vis,pos))
+        self.marker_msg_counter += 1
+        """ 
+        print a message every 100 tracks received 
+        to check if the system is alive
+        """
+        if self.marker_msg_counter % 100 == 0:
+            print  "marker_message_counter: ", self.marker_msg_counter
+        #print "got msg ",str(msg)
+        #rospy.loginfo("-D- twistCallback: %s" % str(msg))
 #############################################################
 #############################################################
 if __name__ == '__main__':

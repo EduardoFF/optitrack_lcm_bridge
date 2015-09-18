@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 """
-   waypoint_scenario_bm - reproduces scenario from bonnmotion traces
-   
     Copyright (C) 2014 Eduardo Feo
      
     This program is free software: you can redistribute it and/or modify
@@ -37,11 +35,12 @@ class LCMTrackerBridge():
     #############################################################
     def __init__(self):
     #############################################################
-        rospy.init_node("tracker_lcm_ros_bridge")
+        rospy.init_node("optitrack_lcm_bridge")
         nodename = rospy.get_name()
         rospy.loginfo("%s started" % nodename)
     
         self.nodes = {}
+        self.message_counter = 0
         self.channel = rospy.get_param("~channel", "TRACK")
         print "Publishing LCM channel",self.channel
         self.x_shift = rospy.get_param("~x_shift", 0.0)
@@ -72,7 +71,7 @@ class LCMTrackerBridge():
         while not rospy.is_shutdown():
             self.spinOnce()
             r.sleep()
-            print "sleep over"
+            #print "sleep over"
             self.ticks_since_start +=1
              
 
@@ -86,7 +85,7 @@ class LCMTrackerBridge():
         msg = pose_list_t()
         msg.timestamp = int(time.time() * 1000000)
         msg.poses=[]
-        print len(self.nodes)
+        #print len(self.nodes)
         for (r, (pos,ori)) in self.nodes.items():
             pose = pose_t()
             pose.robotid = r
@@ -98,13 +97,12 @@ class LCMTrackerBridge():
             msg.poses.append(pose)
         msg.n = len(msg.poses)
         self.lc.publish(self.channel, msg.encode())
-        print "msg published"
+        #print "msg published"
 
     
     #############################################################
     def trackCallback(self,msg):
     ############################################################
-        hey=-1
         self.nodes = {}
         for i in range(len(msg.rigid_bodies)):
             rid = msg.rigid_bodies[i].id
@@ -116,6 +114,13 @@ class LCMTrackerBridge():
                    msg.rigid_bodies[i].pose.orientation.z, \
                    msg.rigid_bodies[i].pose.orientation.w )
             self.nodes[rid] = (pos, ori)
+        self.message_counter += 1
+        """ 
+        print a message every 100 tracks received 
+        to check if the system is alive
+        """
+        if self.message_counter % 100 == 0:
+            print  "message_counter: ", self.message_counter
         #print "got msg ",str(msg)
         #rospy.loginfo("-D- twistCallback: %s" % str(msg))
     
