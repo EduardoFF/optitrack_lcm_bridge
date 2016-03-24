@@ -1,4 +1,0 @@
-lcm-gen --python --ppath . \
-  /home/eduardo/devel/online_rnp/lcm_msgs/pose_t.lcm \
-  /home/eduardo/devel/online_rnp/lcm_msgs/pose_list_t.lcm
-
