@@ -59,13 +59,27 @@ class LCMTrackerBridge():
         rospy.Subscriber('/optitrack/unlabeled_markers', \
                          Markers, self.markerCallback)
 
-        self.lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=1") 
+        self.lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=1,transmit_only=true")
+        self.lc_marker = lcm.LCM("udpm://239.255.76.67:7667?ttl=0,transmit_only=true") 
 
         self.publish_rigid_bodies = rospy.get_param("~publish_rigid_bodies",True)
-        self.publish_markers = rospy.get_param("~publish_markers",False)
+        self.publish_markers = rospy.get_param("~publish_markers",True)
     
-        self.rate = rospy.get_param("~rate", 30)
+        self.rate = rospy.get_param("~rate", 10)
+        """ estimation of speed occurs at different rate """
+        self.speed_est_interval = rospy.get_param("~speed_est_interval", 5)
+        self.speed_est_ema_alpha = rospy.get_param("~speed_est_ema_alpha", 0.9)
+        
         print "rate = ",self.rate
+        self.speed_est_last_pose=dict()
+        self.speed_est_counter = self.speed_est_interval
+        self.speed_est_timeinterval = (1.0 / self.rate) * self.speed_est_interval  
+        self.speed_est_current = dict()
+
+        """ threshold in mm for fitering markers - to avoid unlabelled markers that actually
+        belong to some rigid body 
+        """
+        self.marker_rb_threshold = 50
         #self.timeout_ticks = rospy.get_param("~timeout_ticks", 2)
         #self.left = 0
         #self.right = 0
@@ -97,33 +111,90 @@ class LCMTrackerBridge():
         if self.publish_rigid_bodies:
             self.publishRigidBodies()
         if self.publish_markers:
+            self.filterMarkers()
             self.publishMarkers()
+        self.speed_est_counter-=1
+        if self.speed_est_counter <= 0:
+            self.estimateSpeed()
+            """ reset counter """
+            self.speed_est_counter = self.speed_est_interval
 
+    def estimateSpeed(self):
+        for (r, [xn,yn,zn]) in self.last_published_position.items():
+            if r in self.speed_est_last_pose:
+                [xp,yp,zp] = self.speed_est_last_pose[r]
+                d=((xn-xp)**2 + (yn-yp)**2)**0.5
+                speed=math.ceil(d/self.speed_est_timeinterval)
+                if r in self.speed_est_current:
+                    prev_speed = self.speed_est_current[r]
+                    speed = self.speed_est_ema_alpha * speed + (1 - self.speed_est_ema_alpha ) * prev_speed
+                    self.speed_est_current[r] = speed
+                    #print "speed ",r, speed
+                else:
+                    self.speed_est_current[r] = speed
+        self.speed_est_last_pose = self.last_published_position
+                                                
     def publishRigidBodies(self):
         # testing
         msg = pose_list_t()
         msg.timestamp = int(time.time() * 1000000)
         msg.poses=[]
         #print len(self.nodes)
+        """ clear the last published position """
+        self.last_published_position = dict()
         for (r, (pos,ori)) in self.nodes.items():
             pose = pose_t()
             pose.robotid = r
             (x,y,z) = pos
 #            pose.position = [math.ceil(x*1000), math.ceil(z*1000), math.ceil(y*1000)]
             pose.position = [math.ceil(-1*x*1000), math.ceil(-1*y*1000), math.ceil(z*1000)]
+            [xn,yn,zn] = pose.position
+            self.last_published_position[r] = list(pose.position)
             (x,y,z,w) = ori
             pose.orientation = [w*10000,x*10000,y*10000,z*10000]
+            if r in self.speed_est_current:
+                pose.velocity = self.speed_est_current[r]
+            else:
+                pose.velocity = 0
+            pose.velocity = min(pose.velocity, 32000)
+            pose.velocity = max(pose.velocity, -32000)
+            #pose.velocity = 0.0
+            #pose.velocity = 0.0
             msg.poses.append(pose)
         msg.n = len(msg.poses)
         self.lc.publish(self.channel, msg.encode())
         if self.ticks_since_start % 10 == 0:
-            print "published ", len(msg.poses), "rigid bodies"
+            print "published ", msg.n, " rigid bodies"
         #print "msg published"
+    def dist2d(self, (x1,y1,z1),(x2,y2,z2)):
+        return ((x1-x2)**2 + (y1-y2)**2)**0.5
+    
+    def filterMarkers(self):
+        filteredMarkers = list()
+        n=len(self.markers)
+        for (v,pos) in self.markers:
+            if v:
+                (x,y,z) = pos
+                badboy=False
+                for (r,[xr,yr,zr]) in self.last_published_position.items():
+                    (xm,ym,zm) = (math.ceil(-1*1000*x), math.ceil(-1*y*1000), math.ceil(z*1000))
+                    if self.dist2d( (xm,ym,zm), (xr,yr,zr)) <  self.marker_rb_threshold:
+                        badboy=True
+                        break
+                if not badboy:
+                    filteredMarkers.append((v,pos))
+        self.markers = filteredMarkers
+        if n > len(filteredMarkers):
+            print "Filtered markers ",n-len(filteredMarkers)
+            
     def publishMarkers(self):
         # testing
         msg = marker_list_t()
         msg.timestamp = int(time.time() * 1000000)
         msg.markers=[]
+#        print ""
+#        print "going to publish ", len(self.markers), "markers"
+#        print ""
         #print len(self.nodes)
         for (v,pos) in self.markers:
             marker = marker_t()
@@ -135,7 +206,7 @@ class LCMTrackerBridge():
         msg.n = len(msg.markers)
         if self.ticks_since_start % 10 == 0:
             print "published ",len(msg.markers),"markers"
-        self.lc.publish(self.marker_channel, msg.encode())
+        self.lc_marker.publish(self.marker_channel, msg.encode())
         #print "msg published"
 
 
@@ -145,7 +216,12 @@ class LCMTrackerBridge():
     ############################################################
         self.nodes = {}
         for i in range(len(msg.rigid_bodies)):
+            if msg.rigid_bodies[i].number_of_visible_markers == 0:
+                continue
             rid = msg.rigid_bodies[i].id
+#            if rid >= 100:
+#                continue
+                
             pos = (msg.rigid_bodies[i].pose.position.x, \
                    msg.rigid_bodies[i].pose.position.y, \
                    msg.rigid_bodies[i].pose.position.z)
@@ -180,7 +256,7 @@ class LCMTrackerBridge():
         to check if the system is alive
         """
         if self.marker_msg_counter % 100 == 0:
-            print  "marker_message_counter: ", self.marker_msg_counter
+            print  "marker_message_counter: ", self.marker_msg_counter, " number of markers", len(msg.markers)
         #print "got msg ",str(msg)
         #rospy.loginfo("-D- twistCallback: %s" % str(msg))
 #############################################################
