@@ -1,0 +1,10 @@
+<launch>
+    <arg name="channel" default="TRACK"/>
+    <arg name="rate" default="10"/>	
+    <arg name="log_output" default="screen" />
+    <node pkg="optitrack_lcm_bridge" type="optitrack_lcm_bridge.py" name="optitrack_lcm_bridge" required="true" output="$(arg log_output)">
+    	  <param name="channel" value="$(arg channel)" />
+	  <param name="rate" value="$(arg rate)" />	
+    </node>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="fb2world" args="0 0 0 3.14 0 0 World footbot" output="log"/>
+</launch>
