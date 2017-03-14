@@ -7,5 +7,5 @@
 	  <param name="rate" value="$(arg rate)" />
 	  <param name="publish_markers" value="0" />
     </node>
-    <node pkg="tf2_ros" type="static_transform_publisher" name="fb2world" args="0 0 0 3.14 0 0 World footbot" output="log"/>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="fb2world" args="0 0 0 3.14 0 0 World footbot" output="$(arg log_output)"/>
 </launch>
